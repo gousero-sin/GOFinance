@@ -154,23 +154,150 @@ export async function getUserFinancialSummary(userId: number) {
   const db = await getDb();
   if (!db) return { totalIncome: 0, totalExpense: 0, balance: 0 };
   const { transactions } = await import("../drizzle/schema");
-  const { sum, and } = await import("drizzle-orm");
-  
+
   const allTransactions = await db.select().from(transactions).where(eq(transactions.userId, userId));
-  
+
   const totalIncome = allTransactions
     .filter(t => t.type === "income")
     .reduce((acc, t) => acc + t.amount, 0);
-  
+
   const totalExpense = allTransactions
     .filter(t => t.type === "expense")
     .reduce((acc, t) => acc + t.amount, 0);
-  
+
   return {
     totalIncome,
     totalExpense,
     balance: totalIncome - totalExpense,
   };
+}
+
+export async function getUserCategoryBreakdown(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { transactions, categories } = await import("../drizzle/schema");
+
+  const rows = await db
+    .select({
+      amount: transactions.amount,
+      type: transactions.type,
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+      categoryColor: categories.color,
+    })
+    .from(transactions)
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(eq(transactions.userId, userId));
+
+  const totals = new Map<
+    number,
+    {
+      categoryId: number;
+      name: string;
+      type: "income" | "expense";
+      total: number;
+      color: string | null;
+    }
+  >();
+
+  for (const row of rows) {
+    if (!row.categoryId) continue;
+
+    const current = totals.get(row.categoryId);
+    const name = row.categoryName ?? "Sem categoria";
+    const base =
+      current ?? {
+        categoryId: row.categoryId,
+        name,
+        type: row.type,
+        total: 0,
+        color: row.categoryColor ?? null,
+      };
+
+    const updatedTotal = (current?.total ?? 0) + row.amount;
+
+    totals.set(row.categoryId, {
+      ...base,
+      total: updatedTotal,
+    });
+  }
+
+  const totalAmount = Array.from(totals.values()).reduce(
+    (acc, item) => acc + item.total,
+    0
+  );
+
+  return Array.from(totals.values())
+    .map(item => ({
+      ...item,
+      percentage: totalAmount ? item.total / totalAmount : 0,
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export async function getUserMonthlyTrends(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { transactions } = await import("../drizzle/schema");
+
+  const rows = await db
+    .select({
+      amount: transactions.amount,
+      type: transactions.type,
+      date: transactions.date,
+    })
+    .from(transactions)
+    .where(eq(transactions.userId, userId));
+
+  const formatter = new Intl.DateTimeFormat("pt-BR", {
+    month: "short",
+    year: "numeric",
+  });
+
+  const monthly = new Map<
+    string,
+    {
+      month: string;
+      label: string;
+      income: number;
+      expense: number;
+    }
+  >();
+
+  for (const row of rows) {
+    const date = new Date(row.date);
+    if (Number.isNaN(date.getTime())) {
+      continue;
+    }
+
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const label = formatter.format(date);
+
+    const current =
+      monthly.get(key) ?? {
+        month: key,
+        label,
+        income: 0,
+        expense: 0,
+      };
+
+    if (row.type === "income") {
+      current.income += row.amount;
+    } else {
+      current.expense += row.amount;
+    }
+
+    monthly.set(key, current);
+  }
+
+  return Array.from(monthly.values())
+    .map(item => ({
+      ...item,
+      net: item.income - item.expense,
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
 }
 
 /**
