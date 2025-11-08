@@ -157,15 +157,15 @@ export async function getUserFinancialSummary(userId: number) {
   const { transactions } = await import("../drizzle/schema");
 
   const allTransactions = await db.select().from(transactions).where(eq(transactions.userId, userId));
-  
+
   const totalIncome = allTransactions
     .filter(t => t.type === "income")
     .reduce((acc, t) => acc + t.amount, 0);
-  
+
   const totalExpense = allTransactions
     .filter(t => t.type === "expense")
     .reduce((acc, t) => acc + t.amount, 0);
-  
+
   return {
     totalIncome,
     totalExpense,
@@ -173,48 +173,73 @@ export async function getUserFinancialSummary(userId: number) {
   };
 }
 
-export async function getUserCategoryBreakdown(userId: number): Promise<CategoryBreakdownItem[]> {
+export async function getUserCategoryBreakdown(userId: number) {
   const db = await getDb();
-  if (!db) {
-    return [];
-  }
+  if (!db) return [];
 
   const { transactions, categories } = await import("../drizzle/schema");
 
   const rows = await db
     .select({
-      categoryId: transactions.categoryId,
       amount: transactions.amount,
-      categoryType: categories.type,
-      name: categories.name,
-      color: categories.color,
+      type: transactions.type,
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+      categoryColor: categories.color,
     })
     .from(transactions)
-    .innerJoin(categories, eq(transactions.categoryId, categories.id))
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .where(eq(transactions.userId, userId));
 
-  const totals = new Map<number, CategoryBreakdownItem>();
+  const totals = new Map<
+    number,
+    {
+      categoryId: number;
+      name: string;
+      type: "income" | "expense";
+      total: number;
+      color: string | null;
+    }
+  >();
 
   for (const row of rows) {
-    const existing = totals.get(row.categoryId);
-    const totalAmount = (existing?.totalAmount ?? 0) + row.amount;
+    if (!row.categoryId) continue;
+
+    const current = totals.get(row.categoryId);
+    const name = row.categoryName ?? "Sem categoria";
+    const base =
+      current ?? {
+        categoryId: row.categoryId,
+        name,
+        type: row.type,
+        total: 0,
+        color: row.categoryColor ?? null,
+      };
+
+    const updatedTotal = (current?.total ?? 0) + row.amount;
+
     totals.set(row.categoryId, {
-      categoryId: row.categoryId,
-      name: row.name,
-      color: row.color,
-      type: row.categoryType,
-      totalAmount,
+      ...base,
+      total: updatedTotal,
     });
   }
 
-  return Array.from(totals.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+  const totalAmount = Array.from(totals.values()).reduce(
+    (acc, item) => acc + item.total,
+    0
+  );
+
+  return Array.from(totals.values())
+    .map(item => ({
+      ...item,
+      percentage: totalAmount ? item.total / totalAmount : 0,
+    }))
+    .sort((a, b) => b.total - a.total);
 }
 
-export async function getUserMonthlyTrends(userId: number): Promise<MonthlyTrendItem[]> {
+export async function getUserMonthlyTrends(userId: number) {
   const db = await getDb();
-  if (!db) {
-    return [];
-  }
+  if (!db) return [];
 
   const { transactions } = await import("../drizzle/schema");
 
@@ -227,35 +252,53 @@ export async function getUserMonthlyTrends(userId: number): Promise<MonthlyTrend
     .from(transactions)
     .where(eq(transactions.userId, userId));
 
-  const trends = new Map<string, MonthlyTrendItem>();
+  const formatter = new Intl.DateTimeFormat("pt-BR", {
+    month: "short",
+    year: "numeric",
+  });
+
+  const monthly = new Map<
+    string,
+    {
+      month: string;
+      label: string;
+      income: number;
+      expense: number;
+    }
+  >();
 
   for (const row of rows) {
-    const date = row.date instanceof Date ? row.date : new Date(row.date);
-    const year = date.getUTCFullYear();
-    const month = date.getUTCMonth() + 1;
-    const key = `${year}-${month.toString().padStart(2, "0")}`;
-
-    let entry = trends.get(key);
-    if (!entry) {
-      entry = { year, month, income: 0, expense: 0, net: 0 };
-      trends.set(key, entry);
+    const date = new Date(row.date);
+    if (Number.isNaN(date.getTime())) {
+      continue;
     }
+
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const label = formatter.format(date);
+
+    const current =
+      monthly.get(key) ?? {
+        month: key,
+        label,
+        income: 0,
+        expense: 0,
+      };
 
     if (row.type === "income") {
-      entry.income += row.amount;
+      current.income += row.amount;
     } else {
-      entry.expense += row.amount;
+      current.expense += row.amount;
     }
 
-    entry.net = entry.income - entry.expense;
+    monthly.set(key, current);
   }
 
-  return Array.from(trends.values()).sort((a, b) => {
-    if (a.year === b.year) {
-      return a.month - b.month;
-    }
-    return a.year - b.year;
-  });
+  return Array.from(monthly.values())
+    .map(item => ({
+      ...item,
+      net: item.income - item.expense,
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
 }
 
 /**
