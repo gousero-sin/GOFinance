@@ -152,6 +152,14 @@ export const appRouter = router({
       const { getUserFinancialSummary } = await import("./db");
       return getUserFinancialSummary(ctx.user.id);
     }),
+    categoryBreakdown: protectedProcedure.query(async ({ ctx }) => {
+      const { getUserCategoryBreakdown } = await import("./db");
+      return getUserCategoryBreakdown(ctx.user.id);
+    }),
+    monthlyTrends: protectedProcedure.query(async ({ ctx }) => {
+      const { getUserMonthlyTrends } = await import("./db");
+      return getUserMonthlyTrends(ctx.user.id);
+    }),
   }),
 
   // AI Assistant

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import type { CategoryBreakdownItem, MonthlyTrendItem } from "@shared/types";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -154,8 +155,7 @@ export async function getUserFinancialSummary(userId: number) {
   const db = await getDb();
   if (!db) return { totalIncome: 0, totalExpense: 0, balance: 0 };
   const { transactions } = await import("../drizzle/schema");
-  const { sum, and } = await import("drizzle-orm");
-  
+
   const allTransactions = await db.select().from(transactions).where(eq(transactions.userId, userId));
   
   const totalIncome = allTransactions
@@ -171,6 +171,91 @@ export async function getUserFinancialSummary(userId: number) {
     totalExpense,
     balance: totalIncome - totalExpense,
   };
+}
+
+export async function getUserCategoryBreakdown(userId: number): Promise<CategoryBreakdownItem[]> {
+  const db = await getDb();
+  if (!db) {
+    return [];
+  }
+
+  const { transactions, categories } = await import("../drizzle/schema");
+
+  const rows = await db
+    .select({
+      categoryId: transactions.categoryId,
+      amount: transactions.amount,
+      categoryType: categories.type,
+      name: categories.name,
+      color: categories.color,
+    })
+    .from(transactions)
+    .innerJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(eq(transactions.userId, userId));
+
+  const totals = new Map<number, CategoryBreakdownItem>();
+
+  for (const row of rows) {
+    const existing = totals.get(row.categoryId);
+    const totalAmount = (existing?.totalAmount ?? 0) + row.amount;
+    totals.set(row.categoryId, {
+      categoryId: row.categoryId,
+      name: row.name,
+      color: row.color,
+      type: row.categoryType,
+      totalAmount,
+    });
+  }
+
+  return Array.from(totals.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+}
+
+export async function getUserMonthlyTrends(userId: number): Promise<MonthlyTrendItem[]> {
+  const db = await getDb();
+  if (!db) {
+    return [];
+  }
+
+  const { transactions } = await import("../drizzle/schema");
+
+  const rows = await db
+    .select({
+      amount: transactions.amount,
+      type: transactions.type,
+      date: transactions.date,
+    })
+    .from(transactions)
+    .where(eq(transactions.userId, userId));
+
+  const trends = new Map<string, MonthlyTrendItem>();
+
+  for (const row of rows) {
+    const date = row.date instanceof Date ? row.date : new Date(row.date);
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + 1;
+    const key = `${year}-${month.toString().padStart(2, "0")}`;
+
+    let entry = trends.get(key);
+    if (!entry) {
+      entry = { year, month, income: 0, expense: 0, net: 0 };
+      trends.set(key, entry);
+    }
+
+    if (row.type === "income") {
+      entry.income += row.amount;
+    } else {
+      entry.expense += row.amount;
+    }
+
+    entry.net = entry.income - entry.expense;
+  }
+
+  return Array.from(trends.values()).sort((a, b) => {
+    if (a.year === b.year) {
+      return a.month - b.month;
+    }
+    return a.year - b.year;
+  });
 }
 
 /**
