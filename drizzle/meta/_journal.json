@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1762526358505,
+      "tag": "0000_simple_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1762526531628,
+      "tag": "0001_sudden_lady_deathstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1762607490939,
+      "tag": "0002_cloudy_loa",
+      "breakpoints": true
+    }
+  ]
+}
