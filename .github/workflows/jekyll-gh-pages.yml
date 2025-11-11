@@ -2,32 +2,29 @@ name: Build & Deploy Pages (Jekyll)
 on:
   push:
     branches: [ main ]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/jekyll-build-pages@v1
+      - uses: actions/configure-pages@v5               # configura GitHub Pages:contentReference[oaicite:2]{index=2}
+      - uses: actions/jekyll-build-pages@v1            # compila o Jekyll:contentReference[oaicite:3]{index=3}
         with:
           source: .
           destination: ./_site
-          # token: ${{ secrets.GITHUB_TOKEN }}  # se seu action exigir
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./_site
+      - uses: actions/upload-pages-artifact@v3         # envia artefato para implantar:contentReference[oaicite:4]{index=4}
 
   deploy:
     needs: build
-    permissions:
-      pages: write
-      id-token: write
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4                  # implanta no GitHub Pages:contentReference[oaicite:5]{index=5}
